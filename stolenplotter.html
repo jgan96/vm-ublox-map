@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset='utf-8' />
+    <title>Stolen Bike Tracking | Bike Hunter Command</title>
+    <meta name='viewport' content='initial-scale=1,maximum-scale=1,user-scalable=no' />
+    <script
+      src="http://code.jquery.com/jquery-3.4.1.min.js"
+      integrity="sha256-CSXorXvZcTkaix6Yvo6HppcZGetbYMGWSFlBw8HfCJo="
+      crossorigin="anonymous">
+    </script>
+    <script src='https://api.tiles.mapbox.com/mapbox-gl-js/v1.3.1/mapbox-gl.js'></script>
+    <link href='https://api.tiles.mapbox.com/mapbox-gl-js/v1.3.1/mapbox-gl.css' rel='stylesheet' />
+    <link href='styles.css' rel='stylesheet' />
+    <style>
+        body { margin:0; padding:0; }
+        #map { position:absolute; top:0; bottom:0; width:100%; }
+    </style>
+</head>
+<body>
+
+<style>
+  .hh {
+    color: #000;
+    opacity: 1.0;
+    position: absolute;
+    bottom: 10px;
+    right: 10px;
+    border-radius: 3px;
+    background-color: rgba(247, 155, 49, 0.8);
+    padding: 10px;
+    font: 20px Arial, sans-serif;
+    text-decoration: none;
+  }
+
+  .hh:hover {
+    background-color: rgba(247, 155, 49, 1.0);
+  }
+</style>
+
+<div id='map'></div>
+<div id='stats' class='stats'></div>
+<h1><a href="plotter.html" class='hh'>Bike Hunter Command | Stolen Bikes</a></h1>
+<nav id='filter-group' class='filter-group'></nav>
+
+<script>
+mapboxgl.accessToken = 'pk.eyJ1IjoiamFzb252YW5tb29mIiwiYSI6ImNqenRlYWtwMzAzbzAza28wZW95eml2b2kifQ.at7Way0huHWZINkReacINQ';
+var map = new mapboxgl.Map({
+    container: 'map',
+    zoom: 1.5,
+    center: [0, 20],
+    style: 'mapbox://styles/mapbox/dark-v10'
+});
+
+map.addControl(new mapboxgl.NavigationControl());
+map.doubleClickZoom.enable();
+map.keyboard.enable();
+map.touchZoomRotate.enable({ around: 'center' });
+map.touchZoomRotate.disableRotation();
+
+var dataset = "ck113nb3a16n72is2sdocnmvm";
+var updatedStat = false;
+
+// filters for classifying earthquakes into five categories based on magnitude
+var isStolen = ["==", ["get", "stolen"], "True"];
+var mag1 = ["all", isStolen, ["<", ["get", "UTC offset"], ["*", 60, 8]]];
+var mag2 = ["all", isStolen, [">=", ["get", "UTC offset"], ["*", 60, 8]], ["<", ["get", "UTC offset"], ["*", 60, 12]]];
+var mag3 = ["all", isStolen, [">=", ["get", "UTC offset"], ["*", 60, 12]], ["<", ["get", "UTC offset"], ["*", 60, 24]]];
+var mag4 = ["all", isStolen, [">=", ["get", "UTC offset"], ["*", 60, 24]], ["<", ["get", "UTC offset"], ["*", 60, 48]]];
+var mag5 = ["all", isStolen, [">=", ["get", "UTC offset"], ["*", 60, 48]]];
+
+// colors and legend to use for the categories
+// TODO: this should be changed to a dict
+//var colors = ['#fed976', '#feb24c', '#fd8d3c', '#fc4e2a', '#e31a1c']; //orange-yellow, orange, red-orange, red, maroon
+var colors = ['#f8ff30', '#f21d16', '#24a38c', '#a6a8ab', '#5b5b5c']; //0-8 hours = yellow, 8-12 hours = red, 12-24 hours = blue, 24-48 hours = gray, 48-72 hours = light gray
+var legend = ['0-8 hours', '8-12 hours', '12-24 hours', '24-48 hours', '48-72 hours'];
+var filterGroup = document.getElementById('filter-group');
+
+map.on('load', function () {
+    // add a clustered GeoJSON source for a sample set of earthquakes
+    map.addSource('bikes', {
+        "type": "geojson",
+        "data": "https://api.mapbox.com/datasets/v1/jasonvanmoof/" + dataset + "/features?access_token=" + mapboxgl.accessToken,
+        "cluster": true,
+        "clusterRadius": 10,
+        "clusterMaxZoom": 4,
+        "clusterProperties": { // keep separate counts for each magnitude category in a cluster
+            "mag1": ["+", ["case", mag1, 1, 0]],
+            "mag2": ["+", ["case", mag2, 1, 0]],
+            "mag3": ["+", ["case", mag3, 1, 0]],
+            "mag4": ["+", ["case", mag4, 1, 0]],
+            "mag5": ["+", ["case", mag5, 1, 0]]
+        }
+    });
+
+    // circle and symbol layers for rendering individual earthquakes (unclustered points)
+    for (var i = 1; i <= 5; i++) {
+      var circleID = "bike_circle_mag" + i;
+      var labelID = "bike_label_mag" + i;
+      //console.log(circleID);
+      //console.log(labelID);
+      //console.log(eval("mag" + i));
+
+      map.addLayer({
+          "id": circleID,
+          "type": "circle",
+          "source": "bikes",
+          "filter": ["all", eval("mag" + i), ["!=", ["get", "cluster"], true]], // https://github.com/mapbox/mapbox-gl-js/issues/6656
+          "paint": {
+              "circle-stroke-width": 1,
+              "circle-stroke-color": "black",
+              "circle-stroke-opacity": 1,
+              "circle-color": ["case",
+                  mag1, colors[0],
+                  mag2, colors[1],
+                  mag3, colors[2],
+                  mag4, colors[3],
+                  colors[4]],
+              "circle-opacity": 0.8,
+              "circle-blur": 0.8,
+              "circle-radius": ["case",
+                  mag1, 16,
+                  mag2, 16,
+                  mag3, 14,
+                  mag4, 12,
+                  12]
+              //"circle-radius": 12 //default
+          }
+      });
+      map.addLayer({
+          "id": labelID,
+          "type": "symbol",
+          "source": "bikes",
+          "filter": ["all", eval("mag" + i), ["!=", ["get", "cluster"], true]],
+          "layout": {
+              "text-field": ["get", "Frame number"],
+              "text-font": ["Open Sans Semibold", "Arial Unicode MS Bold"],
+              "text-size": 10
+          },
+          "paint": {
+              "text-color": "white"
+          }
+      });
+
+      // When a click event occurs on a feature in the places layer, open a popup at the
+      // location of the feature, with description HTML from its properties.
+      map.on('click', circleID, function (e) {
+        var reportDate = new Date(e.features[0].properties[ "GMT time" ]);
+        var coordinates = e.features[0].geometry.coordinates.slice();
+        var description = "<b>Frame number: </b>" + e.features[0].properties[ "Frame number" ]
+                          + "<br /><b>MAC address: </b>" + e.features[0].properties[ "MAC address" ]
+                          + "<br /><b>Last report: </b>" + reportDate.toUTCString()
+                          + "<br /><a href='https://maps.google.com/maps?q=" + e.features[0].geometry[ "coordinates" ][1] + "," + e.features[0].geometry[ "coordinates" ][0] + "' target='_blank'><b>Google Maps</a></b>";
+
+        // Ensure that if the map is zoomed out such that multiple
+        // copies of the feature are visible, the popup appears
+        // over the copy being pointed to.
+        while (Math.abs(e.lngLat.lng - coordinates[0]) > 180) {
+          coordinates[0] += e.lngLat.lng > coordinates[0] ? 360 : -360;
+        }
+
+        //center and zoom map on bike_circle
+        if (map.getZoom() > 8)
+        {
+          map.flyTo({center: e.features[0].geometry.coordinates});
+        }
+        else {
+          map.flyTo({center: e.features[0].geometry.coordinates, zoom:8});
+        }
+
+
+        new mapboxgl.Popup()
+          .setLngLat(coordinates)
+          .setHTML(description)
+          .addTo(map);
+      });
+
+      // Change the cursor to a pointer when the mouse is over the places layer.
+      map.on('mouseenter', circleID, function () {
+        map.getCanvas().style.cursor = 'pointer';
+      });
+
+      // Change it back to a pointer when it leaves.
+      map.on('mouseleave', circleID, function () {
+        map.getCanvas().style.cursor = '';
+      });
+
+      // Add checkbox and label elements for the layer.
+      var input = document.createElement('input');
+      input.type = 'checkbox';
+      input.id = circleID;
+      input.checked = true;
+      filterGroup.appendChild(input);
+
+      var label = document.createElement('label');
+      label.setAttribute('for', circleID);
+      label.style.backgroundColor = colors[i - 1];
+      label.textContent = legend[i - 1];
+      filterGroup.appendChild(label);
+    }
+
+    // objects for caching and keeping track of HTML marker objects (for performance)
+    var markers = {};
+    var markersOnScreen = {};
+
+    function getFeatureTotal() {
+      var url = 'https://api.mapbox.com/datasets/v1/jasonvanmoof/" + dataset + "?access_token=' + mapboxgl.accessToken;
+      var featureTotal = $.ajax({
+        url: url,
+        async: false
+      }).responseJSON.features;
+
+      return featureTotal;
+    }
+
+    function getLastUpdated(t, offset) {
+      var dt = new Date(t);
+      var lastUpdatedTime = new Date(dt.getTime() + offset * 60 * 1000);
+      console.log(lastUpdatedTime.toLocaleString());
+
+      console.log("Feature total: " + getFeatureTotal());
+
+      var stats = document.createElement("div");
+      //var node = document.createTextNode("<b>Total # of bikes: </b>");
+      stats.innerHTML = "<b>Last updated: </b>" + lastUpdatedTime.toUTCString(); //"<b>Total # of bikes: </b>" + getFeatureTotal() + 
+      //stats.appendChild(node);
+
+      var element = document.getElementById("stats");
+      element.appendChild(stats);
+    }
+
+    function updateMarkers() {
+        var newMarkers = {};
+        var features = map.querySourceFeatures('bikes');
+        var renderedFeatures = map.queryRenderedFeatures();
+
+        // for every cluster on the screen, create an HTML marker for it (if we didn't yet),
+        // and add it to the map if it's not there already
+        for (var i = 1; i <= features.length; i++) {
+            var coords = features[i - 1].geometry.coordinates;
+            var props = features[i - 1].properties;
+            //if (!props.cluster) console.log(props);
+            if (!props.cluster) {
+              console.log(props);
+              if (!updatedStat) {
+                getLastUpdated(props['GMT time'], props['UTC offset']);
+                updatedStat = true;
+              }
+              continue;
+            }
+            var id = props.cluster_id;
+
+            // every cluster id needs to be unique depending on the cluster's contents as well as layer visibility
+            // if the layer visibility is not factored into the cluster id then the map will not calculate a new cluster when the layer visibility changes
+            // TODO: use a hash for the id instead?
+            console.log("before: " + id);
+            for (var j = 1; j <= legend.length; j++) {
+              id += map.getLayoutProperty("bike_circle_mag" + j, "visibility") == "none" ? "n" : "v"; // do it this way or else getLayoutProperty will be undefined until a change event happens
+            }
+            console.log("after: " + id);
+
+            var marker = markers[id];
+            if (!marker) {
+                var el = createDonutChart(props);
+                marker = markers[id] = new mapboxgl.Marker({element: el}).setLngLat(coords);
+            }
+            newMarkers[id] = marker;
+
+            if (!markersOnScreen[id] && createDonutChart(props) != 0) // use createDonutChart() to calculate if the cluster will be empty. not calculating will result in an empty feature placed on the map
+                marker.addTo(map);
+        }
+
+        // for every marker we've added previously, remove those that are no longer visible
+        for (id in markersOnScreen) {
+            if (!newMarkers[id])
+                markersOnScreen[id].remove();
+        }
+        markersOnScreen = newMarkers;
+    }
+
+    // after the GeoJSON data is loaded, update markers on the screen and do so on every map move/moveend
+    map.on('data', function (e) {
+        if (e.sourceId !== 'bikes' || !e.isSourceLoaded) return;
+
+        map.on('move', updateMarkers);
+        map.on('moveend', updateMarkers);
+        map.on('change', updateMarkers);
+        updateMarkers();
+    });
+});
+
+// code for creating an SVG donut chart from feature properties
+function createDonutChart(props) {
+  var offsets = [];
+  //console.log(map.getLayoutProperty('bike_circle_mag1', 'visibility'));
+  var counts = [props.mag1, props.mag2, props.mag3, props.mag4, props.mag5];
+  console.log(counts);
+
+  for (var i = 1; i <= counts.length; i++) {
+      if (map.getLayoutProperty("bike_circle_mag" + i, "visibility") == "none")
+      {
+        counts[i - 1] = 0;
+      }
+
+      console.log(map.getLayoutProperty("bike_circle_mag" + i, "visibility"));
+  }
+  console.log(counts);
+  var total = 0;
+  for (var i = 0; i < counts.length; i++) {
+      offsets.push(total);
+      total += counts[i];
+  }
+  if (total > 0) {
+    //var fontSize = total >= 100 ? 20 : total >= 50 ? 18 : total >= 20 ? 14 : 10;
+    //var r = total >= 100 ? 50 : total >= 50 ? 32 : total >= 20 ? 24 : 18;
+    var fontSize = total >= 20 ? 14 : 10;
+    var r = total >= 20 ? 24 : 18;
+    var r0 = Math.round(r * 0.6);
+    var w = r * 2;
+
+    var html = '<svg width="' + w + '" height="' + w + '" viewbox="0 0 ' + w + ' ' + w +
+        '" text-anchor="middle" style="font: italic ' + fontSize + 'px sans-serif">';
+
+    var cFill = "black"; //"#edb63e"; //orange
+
+    /*if (counts[0] > 0) {
+      cFill = colors[0];
+    }
+    else if (counts[1] > 0) {
+      cFill = colors[1];
+    }
+    else if (counts[2] > 0) {
+      cFill = colors[2];
+    }
+    else if (counts[3] > 0) {
+      cFill = colors[3];
+    }
+    else if (counts[4] > 0) {
+      cFill = colors[4];
+    }*/
+
+    for (i = 0; i < counts.length; i++) {
+        html += donutSegment(offsets[i] / total, (offsets[i] + counts[i]) / total, r, r0, colors[i]);
+    }
+    html += '<circle cx="' + r + '" cy="' + r + '" r="' + r0 +
+        '" fill="' + cFill + '" fill-opacity="0.4"/><text fill="white" dominant-baseline="central" transform="translate(' +
+        r + ', ' + r + ')">' + total.toLocaleString() + '</text></svg>';
+
+    var el = document.createElement('div');
+    el.innerHTML = html;
+    return el.firstChild;
+  }
+  else {
+    return 0;
+  }
+}
+
+function donutSegment(start, end, r, r0, color) {
+  if (end - start === 1) end -= 0.00001;
+  var a0 = 2 * Math.PI * (start - 0.25);
+  var a1 = 2 * Math.PI * (end - 0.25);
+  var x0 = Math.cos(a0), y0 = Math.sin(a0);
+  var x1 = Math.cos(a1), y1 = Math.sin(a1);
+  var largeArc = end - start > 0.5 ? 1 : 0;
+
+  return ['<path d="M', r + r0 * x0, r + r0 * y0, 'L', r + r * x0, r + r * y0,
+      'A', r, r, 0, largeArc, 1, r + r * x1, r + r * y1,
+      'L', r + r0 * x1, r + r0 * y1, 'A',
+      r0, r0, 0, largeArc, 0, r + r0 * x0, r + r0 * y0,
+      '" fill="' + color + '" />'].join(' ');
+}
+
+// When the checkbox changes, update the visibility of the layer.
+document.addEventListener('change', function(e) {
+  map.setLayoutProperty(e.target.id, 'visibility',
+  e.target.checked ? 'visible' : 'none');
+  map.setLayoutProperty("bike_label_mag" + e.target.id.substring(e.target.id.length - 1, e.target.id.length), 'visibility',
+  e.target.checked ? 'visible' : 'none');
+  console.log(e.target.id);
+});
+</script>
+
+</body>
+</html>
