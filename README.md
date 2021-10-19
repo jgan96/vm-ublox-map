@@ -18,5 +18,5 @@ The input CSV data is just a copy/paste from the /admin/uBlox page in backoffice
 ## plotter.html & stolenplotter.html
 These are the actual HTML pages to view the map.
 
-* stolenplotter.html shows only bikes that are marked as stolen
-* plotter.html shows all bikes 
+* [stolenplotter.html](https://jgan96.github.io/vm-ublox-map/stolenplotter.html) shows only bikes that are marked as stolen
+* [plotter.html](https://jgan96.github.io/vm-ublox-map/plotter.html) shows all bikes 
